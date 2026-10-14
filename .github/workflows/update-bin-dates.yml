@@ -1,0 +1,48 @@
+name: Update bin dates
+
+on:
+  schedule:
+    - cron: '0 5 * * *'   # daily 05:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write   # for the keepalive step
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch bin collection dates
+        env:
+          BIN_PROPERTY_ID: ${{ secrets.BIN_PROPERTY_ID }}
+        run: python bin_dates.py -o bin_dates.json --ics bin_dates.ics
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin_dates.json bin_dates.ics
+          # Gate on the JSON diff only: the ICS file's DTSTAMP changes every
+          # run even when the dates haven't.
+          if git diff --cached --quiet -- bin_dates.json; then
+            echo "No changes to bin dates - skipping commit"
+          else
+            git commit -m "Update bin dates ($(date -u +%Y-%m-%d))"
+            git push
+          fi
+
+      # GitHub disables scheduled workflows after 60 days with no repo
+      # activity. Re-enabling via the API resets that timer without a
+      # dummy commit.
+      - name: Keep schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update-bin-dates.yml/enable"
