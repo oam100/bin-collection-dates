@@ -2,8 +2,20 @@ name: Update bin dates
 
 on:
   schedule:
-    - cron: '0 5 * * *'   # daily 05:00 UTC
-  workflow_dispatch: {}
+    - cron: '0 5 * * *'     # daily 05:00 UTC: refresh dates only
+    # Bin-night notification at 19:30 UK time. Cron is UTC-only, so both
+    # 18:30 UTC (= 19:30 BST) and 19:30 UTC (= 19:30 GMT) are scheduled and
+    # the "Is it bin-night time?" step keeps whichever matches today's UK
+    # offset, so exactly one notification goes out either side of the
+    # clock change.
+    - cron: '30 18 * * *'
+    - cron: '30 19 * * *'
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: 'Also send the bin-night notification (if a collection is tomorrow)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -19,12 +31,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Allowed to fail so the evening notification still goes out using
+      # the last good dates; the run is still marked failed at the end.
       - name: Fetch bin collection dates
+        id: fetch
+        continue-on-error: true
         env:
           BIN_PROPERTY_ID: ${{ secrets.BIN_PROPERTY_ID }}
         run: python bin_dates.py -o bin_dates.json --ics bin_dates.ics
 
       - name: Commit changes if any
+        if: steps.fetch.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -38,6 +55,25 @@ jobs:
             git push
           fi
 
+      - name: Is it bin-night time?
+        id: when
+        run: |
+          offset=$(TZ=Europe/London date +%z)
+          case "${{ github.event_name }}|${{ github.event.schedule }}|${offset}" in
+            "workflow_dispatch|"*)  notify="${{ inputs.notify }}" ;;
+            "schedule|30 18 * * *|+0100") notify=true ;;
+            "schedule|30 19 * * *|+0000") notify=true ;;
+            *) notify=false ;;
+          esac
+          echo "UK offset ${offset}, notify=${notify}"
+          echo "notify=${notify}" >> "$GITHUB_OUTPUT"
+
+      - name: Send bin-night notification
+        if: steps.when.outputs.notify == 'true'
+        env:
+          NOTIFYME_ACCESS_CODE: ${{ secrets.NOTIFYME_ACCESS_CODE }}
+        run: python notify_bins.py -i bin_dates.json
+
       # GitHub disables scheduled workflows after 60 days with no repo
       # activity. Re-enabling via the API resets that timer without a
       # dummy commit.
@@ -46,3 +82,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update-bin-dates.yml/enable"
+
+      - name: Fail if fetching dates failed
+        if: steps.fetch.outcome == 'failure'
+        run: |
+          echo "::error::Fetching bin dates failed - calendar not updated"
+          exit 1

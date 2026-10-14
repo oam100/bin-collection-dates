@@ -27,6 +27,23 @@ The council only publishes the *next* date per bin. Past collections are
 carried over from the previous `bin_dates.json` so they stay in the
 calendar; future dates are never estimated.
 
+## Bin-night Alexa notification
+
+At 19:30 UK time the workflow refreshes the dates and, if anything is
+collected tomorrow, `notify_bins.py` sends an Alexa notification through
+the [Notify Me](https://www.thomptronics.com/about/notify-me) skill, e.g.
+"Bin night: put the rubbish and garden waste out tonight." The Echo chimes
+and shows a yellow ring; "Alexa, what are my notifications?" reads it out.
+
+Needs the `NOTIFYME_ACCESS_CODE` repository secret (the code Notify Me
+emails you). Cron is UTC-only, so 18:30 and 19:30 UTC are both scheduled
+and the workflow keeps whichever is 19:30 in the UK that day. GitHub may
+start scheduled runs some minutes late.
+
+To test: Actions > Update bin dates > Run workflow, tick "Also send the
+bin-night notification" (only sends if tomorrow is a collection day), or
+locally: `python notify_bins.py --dry-run --date YYYY-MM-DD`.
+
 ## Manual run
 
 ```
