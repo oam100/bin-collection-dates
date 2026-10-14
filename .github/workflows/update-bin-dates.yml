@@ -46,9 +46,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin_dates.json bin_dates.ics
-          # Gate on the JSON diff only: the ICS file's DTSTAMP changes every
-          # run even when the dates haven't.
-          if git diff --cached --quiet -- bin_dates.json; then
+          # Ignore DTSTAMP lines: they change every run even when nothing
+          # else has. Diffing the ICS too means format changes get published.
+          if git diff --cached --quiet -I '^DTSTAMP:' -- bin_dates.json bin_dates.ics; then
             echo "No changes to bin dates - skipping commit"
           else
             git commit -m "Update bin dates ($(date -u +%Y-%m-%d))"

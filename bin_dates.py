@@ -39,7 +39,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 BASE = "https://sevenoaks-dc-host01.oncreate.app"
 LOOKUP_PATH = "/w/webpage/waste-collection-day"
@@ -192,13 +192,19 @@ def ics_escape(text: str) -> str:
 
 
 def write_ics(collections: list[tuple[str, date]], path: str) -> None:
-    """One all-day event per collection."""
+    """One all-day event per collection.
+
+    DTEND is spelled out (the day after) even though RFC 5545 implies it
+    for all-day events: some clients, notably Apple Calendar via Google's
+    CalDAV sync, otherwise treat the event as zero-length and hide it.
+    """
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//bin-collection-dates//EN",
         "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
         "X-WR-CALNAME:Bin collections",
     ]
     for key, d in collections:
@@ -207,6 +213,7 @@ def write_ics(collections: list[tuple[str, date]], path: str) -> None:
             f"UID:{key}-{d.isoformat()}@bin-collection-dates",
             f"DTSTAMP:{stamp}",
             f"DTSTART;VALUE=DATE:{d.strftime('%Y%m%d')}",
+            f"DTEND;VALUE=DATE:{(d + timedelta(days=1)).strftime('%Y%m%d')}",
             f"SUMMARY:{ics_escape(BIN_TYPES[key] + ' collection')}",
             "TRANSP:TRANSPARENT",
             "END:VEVENT",
