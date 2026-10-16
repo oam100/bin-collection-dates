@@ -1,8 +1,8 @@
 {
   "next_collections": {
-    "general": "2026-10-15",
+    "general": "2026-10-29",
     "recycling": "2026-10-22",
-    "garden": "2026-10-15"
+    "garden": "2026-10-29"
   },
   "collections": [
     {
@@ -16,6 +16,14 @@
     {
       "type": "recycling",
       "date": "2026-10-22"
+    },
+    {
+      "type": "garden",
+      "date": "2026-10-29"
+    },
+    {
+      "type": "general",
+      "date": "2026-10-29"
     }
   ]
 }
