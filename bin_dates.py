@@ -54,6 +54,13 @@ BIN_TYPES = {
     "recycling": "Recycling",
     "garden": "Garden waste",
 }
+# Output key -> service code prefix in the page's service table (e.g. a
+# "GW-WKA-THU" round), used when a section shows no date.
+SERVICE_CODES = {"general": "REF", "recycling": "RCY", "garden": "GW"}
+# A run fails if any of these is missing. Garden waste isn't required: the
+# council's page sometimes claims the address isn't subscribed (seen
+# 2026-10-16, while still listing the garden bin's round).
+REQUIRED = {"general", "recycling"}
 
 INPUT_NAME_RE = re.compile(r"payload\[(PAG\w+)\]\[(PWG\w+)\]\[(PCL\w+)\]")
 WIDGET_TOKEN_RE = re.compile(r"webpage_token=([0-9a-f]+)")
@@ -145,24 +152,54 @@ def html_to_text(fragment: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def parse_dates(schedule_html: str) -> dict[str, date]:
-    """Extract {key: next collection date} for every type in BIN_TYPES.
+def section_date(text: str, heading: str) -> date | None:
+    match = re.search(
+        re.escape(heading)
+        + r" Your next collection date is (?:NextCollectionDate )?([A-Za-z]+, \d{1,2} [A-Za-z]+ \d{4})",
+        text,
+    )
+    return datetime.strptime(match.group(1), "%A, %d %B %Y").date() if match else None
 
-    Each section reads "<Heading> Your next collection date is
-    [NextCollectionDate] Thursday, 15 October 2026". The same headings also
-    appear earlier in a debug table, which this pattern doesn't match.
+
+def table_date(text: str, code: str, today: date) -> date | None:
+    """Earliest upcoming NextCollectionDate for a service in the page's table.
+
+    Rows read like "GW06 GW-WKA-THU 168,824 Thu, 29 Oct 2026": round code,
+    round schedule, item id, next collection date.
     """
+    dates = [
+        datetime.strptime(m.group(1), "%a, %d %b %Y").date()
+        for m in re.finditer(
+            rf"\b{code}\d*\s+{code}-\S+\s+[\d,]+\s+([A-Za-z]{{3}}, \d{{2}} [A-Za-z]{{3}} \d{{4}})", text
+        )
+    ]
+    upcoming = [d for d in dates if d >= today]
+    return min(upcoming) if upcoming else None
+
+
+def parse_dates(schedule_html: str, today: date | None = None) -> dict[str, date]:
+    """Extract {key: next collection date} for the types in BIN_TYPES.
+
+    Each section normally reads "<Heading> Your next collection date is
+    [NextCollectionDate] Thursday, 15 October 2026". When a section has no
+    date, the page's service table is used instead. Types still missing are
+    left out with a warning, unless they're in REQUIRED.
+    """
+    today = today or date.today()
     text = html_to_text(schedule_html)
     dates = {}
     for key, heading in BIN_TYPES.items():
-        match = re.search(
-            re.escape(heading)
-            + r" Your next collection date is (?:NextCollectionDate )?([A-Za-z]+, \d{1,2} [A-Za-z]+ \d{4})",
-            text,
-        )
-        if not match:
+        d = section_date(text, heading)
+        if d is None:
+            d = table_date(text, SERVICE_CODES[key], today)
+            if d is not None:
+                print(f"Warning: no date in the {heading!r} section, using the service table ({d})", file=sys.stderr)
+        if d is not None:
+            dates[key] = d
+        elif key in REQUIRED:
             raise ScrapeError(f"No next collection date found for {heading!r} - page structure may have changed")
-        dates[key] = datetime.strptime(match.group(1), "%A, %d %B %Y").date()
+        else:
+            print(f"Warning: no next collection date for {heading!r} - leaving it out", file=sys.stderr)
     return dates
 
 
